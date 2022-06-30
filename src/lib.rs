@@ -55,6 +55,7 @@ fn flush_events(app: &Arc<Mutex<App>>) -> anyhow::Result<()> {
 }
 
 async fn run_ui(mut term: Terminal, app: Arc<Mutex<App>>) -> anyhow::Result<()> {
+	// tick duration
 	let timeout = std::time::Duration::from_secs(1);
 	loop {
 		{
@@ -67,6 +68,8 @@ async fn run_ui(mut term: Terminal, app: Arc<Mutex<App>>) -> anyhow::Result<()> 
 				app.render(frame, area)
 			})?;
 		}
+		// I don't understand the point behind some apps using a seperate thread and a channel with ticks to send events
+		// this is doing the exact same thing, perhaps the other allows you to avoid rerendering on unused events
 		if event::poll(timeout)? {
 			let event = event::read()?;
 			handle_event(event, &app);
