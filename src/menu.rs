@@ -3,23 +3,23 @@ use tui::{
 	layout::{Constraint, Direction, Layout, Rect},
 	style::{Color, Modifier, Style},
 	text::{Span, Spans},
-	widgets::{Block, Borders, List, ListItem, ListState},
+	widgets::{Block, List, ListItem, ListState},
 };
 
 use crate::FrameType;
 
 pub struct Menu {
 	state: ListState,
-	options: Vec<&'static str>,
+	options: Vec<String>,
 	index: usize,
 }
 
-fn init_list(options: &[&'static str]) -> List<'static> {
+fn init_list<'a>(options: &'a [String]) -> List<'a> {
 	let items: Vec<ListItem> = options
 		.iter()
 		.map(|option| {
 			let span = Spans::from(Span::styled(
-				*option,
+				option.as_str(),
 				Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
 			));
 			ListItem::new(span)
@@ -31,8 +31,7 @@ fn init_list(options: &[&'static str]) -> List<'static> {
 }
 
 impl Menu {
-	pub fn new() -> Menu {
-		let options = vec!["A", "B", "Quit"];
+	pub fn new(options: Vec<String>) -> Menu {
 		let mut state = ListState::default();
 		state.select(Some(0));
 		Menu {
