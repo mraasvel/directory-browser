@@ -1,12 +1,17 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crossterm::event::KeyCode;
+use futures::executor;
+use tokio::sync::mpsc::Sender;
 use tui::style::{Color, Style};
 use tui::text::{Span, Spans};
 use tui::widgets::{List, ListItem, ListState};
 
-use crate::Component;
+use crate::processing::ProcessEvent;
+use crate::{processing, Component};
 
+#[derive(Debug, Copy, Clone)]
 enum FileType {
 	File,
 	Directory,
@@ -42,14 +47,16 @@ fn special_directories(path: PathBuf) -> anyhow::Result<Vec<DirEntry>> {
 pub struct Browser {
 	files: Vec<DirEntry>,
 	state: ListState,
+	sender: Arc<Sender<ProcessEvent>>,
 }
 
 impl Browser {
-	pub fn new() -> Browser {
+	pub fn new(sender: Arc<Sender<ProcessEvent>>) -> Browser {
 		let state = ListState::default();
 		Browser {
 			files: Vec::new(),
 			state,
+			sender,
 		}
 	}
 
@@ -76,7 +83,14 @@ impl Browser {
 				if let Err(err) = self.read_directory(self.files[index].path.clone()) {
 					log::error!("{}", err);
 				}
-			},
+			}
+			FileType::File => {
+				let pathbuf = self.files[index].path.as_path().to_path_buf();
+				let future = self.sender.send(ProcessEvent::File(pathbuf));
+				if let Err(e) = executor::block_on(future) {
+					log::error!("{}", e);
+				}
+			}
 			_ => {}
 		}
 	}
@@ -117,9 +131,22 @@ impl Browser {
 	}
 }
 
+fn make_style(file_type: FileType) -> Style {
+	match file_type {
+		FileType::Directory => Style::default().fg(Color::LightBlue),
+		FileType::File => Style::default(),
+		FileType::Symlink => Style::default().fg(Color::LightMagenta),
+		FileType::Other => Style::default().fg(Color::LightRed),
+	}
+}
+
 impl Component for Browser {
 	fn title(&self) -> String {
-		"directory listing".to_string()
+		"Directory Browser".to_string()
+	}
+
+	fn wake(&mut self, _: anyhow::Result<processing::ProcessResult>) {
+		log::info!("browser wake called");
 	}
 
 	fn render(&mut self, frame: &mut crate::FrameType, area: tui::layout::Rect) {
@@ -127,7 +154,8 @@ impl Component for Browser {
 			.files
 			.iter()
 			.map(|file| {
-				let span = Spans::from(Span::styled(file.name.as_str(), Style::default()));
+				let style = make_style(file.file_type);
+				let span = Spans::from(Span::styled(file.name.as_str(), style));
 				ListItem::new(span)
 			})
 			.collect();
@@ -143,7 +171,6 @@ impl Component for Browser {
 	}
 
 	fn keyhook(&mut self, event: crossterm::event::KeyEvent) {
-		log::info!("browser keyhook");
 		match event.code {
 			KeyCode::Up => self.prev(),
 			KeyCode::Down => self.next(),

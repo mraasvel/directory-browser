@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tui::layout::Rect;
 
-use crate::{menu::Menu, Component, FrameType};
+use crate::{menu::Menu, processing::ProcessResult, Component, FrameType};
 
 #[derive(Debug, Eq, PartialEq)]
 enum State {
@@ -12,13 +12,13 @@ enum State {
 pub struct App {
 	pub quit: bool,
 	menu: Menu,
-	components: Vec<Box<dyn Component>>,
+	components: Vec<Box<dyn Component + Send>>,
 	active: usize,
 	state: State,
 }
 
 impl App {
-	pub fn new(components: Vec<Box<dyn Component>>) -> App {
+	pub fn new(components: Vec<Box<dyn Component + Send>>) -> App {
 		let mut titles: Vec<String> = components.iter().map(|c| c.title()).collect();
 		titles.push("Quit".into());
 		App {
@@ -28,6 +28,11 @@ impl App {
 			active: 0,
 			state: State::Menu,
 		}
+	}
+
+	pub fn wake(&mut self, result: anyhow::Result<ProcessResult>) {
+		log::info!("finished processing with: {:?}", result);
+		self.component().wake(result);
 	}
 
 	fn select_tab(&mut self) {
@@ -50,7 +55,7 @@ impl App {
 		}
 	}
 
-	fn component(&mut self) -> &mut Box<dyn Component> {
+	fn component(&mut self) -> &mut Box<dyn Component + Send> {
 		&mut self.components[self.active]
 	}
 
