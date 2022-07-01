@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tui::layout::Rect;
 
-use crate::{menu::Menu, processing::ProcessResult, Component, FrameType};
+use crate::{menu::Menu, Component, FrameType};
 
 #[derive(Debug, Eq, PartialEq)]
 enum State {
@@ -12,13 +12,13 @@ enum State {
 pub struct App {
 	pub quit: bool,
 	menu: Menu,
-	components: Vec<Box<dyn Component + Send>>,
+	components: Vec<Box<dyn Component>>,
 	active: usize,
 	state: State,
 }
 
 impl App {
-	pub fn new(components: Vec<Box<dyn Component + Send>>) -> App {
+	pub fn new(components: Vec<Box<dyn Component>>) -> App {
 		let mut titles: Vec<String> = components.iter().map(|c| c.title()).collect();
 		titles.push("Quit".into());
 		App {
@@ -28,11 +28,6 @@ impl App {
 			active: 0,
 			state: State::Menu,
 		}
-	}
-
-	pub fn wake(&mut self, result: anyhow::Result<ProcessResult>) {
-		log::info!("finished processing with: {:?}", result);
-		self.component().wake(result);
 	}
 
 	fn select_tab(&mut self) {
@@ -55,7 +50,7 @@ impl App {
 		}
 	}
 
-	fn component(&mut self) -> &mut Box<dyn Component + Send> {
+	fn component(&mut self) -> &mut Box<dyn Component> {
 		&mut self.components[self.active]
 	}
 
@@ -75,7 +70,10 @@ impl App {
 	pub fn render(&mut self, frame: &mut FrameType, area: Rect) {
 		match self.state {
 			State::Menu => self.menu.render(frame, area),
-			State::Component => self.component().render(frame, area),
+			State::Component => {
+				self.component().before_render();
+				self.component().render(frame, area)
+			},
 		}
 	}
 }

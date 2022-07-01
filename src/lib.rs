@@ -23,13 +23,13 @@ type FrameType<'a> = Frame<'a, BackendType>;
 
 pub trait Component {
 	fn title(&self) -> String;
+	fn before_render(&mut self) {}
 	fn render(&mut self, frame: &mut FrameType, area: Rect);
 	fn keyhook(&mut self, _: KeyEvent) {}
 	fn mounted(&mut self) -> anyhow::Result<()> {
 		Ok(())
 	}
 	fn unmounted(&mut self) {}
-	fn wake(&mut self, _: anyhow::Result<ProcessResult>) {}
 }
 
 fn handle_keypress(key: KeyEvent, app: &Arc<Mutex<App>>) {
@@ -79,8 +79,8 @@ async fn run_ui(mut term: Terminal, app: Arc<Mutex<App>>) -> anyhow::Result<()> 
 	Ok(())
 }
 
-fn init_components(sender: Arc<Sender<ProcessEvent>>) -> Vec<Box<dyn Component + Send>> {
-	vec![Box::new(Browser::new(sender.clone()))]
+fn init_components() -> Vec<Box<dyn Component>> {
+	vec![Box::new(Browser::new())]
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -89,11 +89,8 @@ pub async fn run() -> anyhow::Result<()> {
 		.format_timestamp_nanos()
 		.init();
 	let term = Terminal::new()?;
-	let (sender, receiver) = processing::channel();
-	let components = init_components(Arc::new(sender));
+	let components = init_components();
 	let app = Arc::new(Mutex::new(App::new(components)));
-	let mut processor = Processor::new(app.clone(), receiver);
-	tokio::spawn(async move { processor.run().await });
 	run_ui(term, app).await?;
 	Ok(())
 }

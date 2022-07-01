@@ -3,12 +3,15 @@ use std::sync::Arc;
 
 use crossterm::event::KeyCode;
 use futures::executor;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
 use tui::style::{Color, Style};
 use tui::text::{Span, Spans};
 use tui::widgets::{List, ListItem, ListState};
+use std::ops::{Deref};
 
-use crate::processing::ProcessEvent;
+use crate::processing::{ProcessEvent, ProcessResult, Processor};
 use crate::{processing, Component};
 
 #[derive(Debug, Copy, Clone)]
@@ -44,40 +47,64 @@ fn special_directories(path: PathBuf) -> anyhow::Result<Vec<DirEntry>> {
 	Ok(files)
 }
 
+#[derive(Default)]
+struct State {
+	processor: Option<Processor>
+}
+
+impl State {
+	fn new() -> State {
+		State { ..Default::default() }
+	}
+}
+
 pub struct Browser {
 	files: Vec<DirEntry>,
-	state: ListState,
-	sender: Arc<Sender<ProcessEvent>>,
+	liststate: ListState,
+	state: Arc<Mutex<State>>,
 }
 
 impl Browser {
-	pub fn new(sender: Arc<Sender<ProcessEvent>>) -> Browser {
-		let state = ListState::default();
+	pub fn new() -> Browser {
+		let liststate = ListState::default();
 		Browser {
 			files: Vec::new(),
-			state,
-			sender,
+			liststate,
+			state: Arc::new(Mutex::new(State::new())),
 		}
 	}
 
 	fn next(&mut self) {
-		let index = self.state.selected().unwrap();
+		let index = self.liststate.selected().unwrap();
 		if index == self.files.len() - 1 {
 			return;
 		}
-		self.state.select(Some(index + 1));
+		self.liststate.select(Some(index + 1));
 	}
 
 	fn prev(&mut self) {
-		let index = self.state.selected().unwrap();
+		let index = self.liststate.selected().unwrap();
 		if index == 0 {
 			return;
 		}
-		self.state.select(Some(index - 1));
+		self.liststate.select(Some(index - 1));
+	}
+
+	async fn process_file(&mut self, path: PathBuf) {
+		if self.state.lock().await.processor.is_some() {
+			log::warn!("already processing file");
+			return;
+		}
+		log::info!("process file: {:?}", path);
+		let state = self.state.clone();
+		self.state.lock().await.processor = Some(processing::spawn(ProcessEvent::File(path), move |result| {
+			log::info!("finished: {:?}", result);
+			executor::block_on(state.lock()).processor = None;
+		}));
 	}
 
 	fn select(&mut self) {
-		let index = self.state.selected().unwrap();
+		let index = self.liststate.selected().unwrap();
 		match self.files[index].file_type {
 			FileType::Directory => {
 				if let Err(err) = self.read_directory(self.files[index].path.clone()) {
@@ -86,10 +113,7 @@ impl Browser {
 			}
 			FileType::File => {
 				let pathbuf = self.files[index].path.as_path().to_path_buf();
-				let future = self.sender.send(ProcessEvent::File(pathbuf));
-				if let Err(e) = executor::block_on(future) {
-					log::error!("{}", e);
-				}
+				executor::block_on(self.process_file(pathbuf));
 			}
 			_ => {}
 		}
@@ -125,7 +149,7 @@ impl Browser {
 				.collect::<anyhow::Result<_>>()?,
 		);
 		assert!(files.len() != 0);
-		self.state.select(Some(0));
+		self.liststate.select(Some(0));
 		self.files = files;
 		Ok(())
 	}
@@ -145,10 +169,6 @@ impl Component for Browser {
 		"Directory Browser".to_string()
 	}
 
-	fn wake(&mut self, _: anyhow::Result<processing::ProcessResult>) {
-		log::info!("browser wake called");
-	}
-
 	fn render(&mut self, frame: &mut crate::FrameType, area: tui::layout::Rect) {
 		let names: Vec<ListItem> = self
 			.files
@@ -160,7 +180,7 @@ impl Component for Browser {
 			})
 			.collect();
 		let list = List::new(names).highlight_style(Style::default().bg(Color::Blue));
-		frame.render_stateful_widget(list, area, &mut self.state);
+		frame.render_stateful_widget(list, area, &mut self.liststate);
 	}
 
 	fn mounted(&mut self) -> anyhow::Result<()> {
